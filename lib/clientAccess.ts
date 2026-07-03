@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
-import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { clientCookieName, verifySessionToken } from "@/lib/clientAuth";
+import { OWNER_COOKIE, verifyOwnerToken } from "@/lib/ownerAuth";
 import type { Website } from "@/lib/types";
 
 export type EditorRole = "owner" | "client";
@@ -30,10 +30,11 @@ export async function getEditorAccess(slug: string): Promise<
   if (!data) return { ok: false, reason: "not_found" };
   const website = data as Website;
 
-  const { userId } = await auth();
-  if (userId) return { ok: true, access: { website, role: "owner" } };
-
   const cookieStore = await cookies();
+  if (await verifyOwnerToken(cookieStore.get(OWNER_COOKIE)?.value)) {
+    return { ok: true, access: { website, role: "owner" } };
+  }
+
   const token = cookieStore.get(clientCookieName(website.id))?.value;
   if (verifySessionToken(token, website.id)) {
     return { ok: true, access: { website, role: "client" } };

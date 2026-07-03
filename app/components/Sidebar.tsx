@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { UserButton } from "@clerk/nextjs";
+import { usePathname, useRouter } from "next/navigation";
 
 const nav = [
   { label: "Websites", href: "/", icon: "◈" },
@@ -10,6 +9,13 @@ const nav = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+
+  async function logout() {
+    await fetch("/api/owner/logout", { method: "POST" });
+    router.push("/login");
+    router.refresh();
+  }
 
   return (
     <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-card">
@@ -43,11 +49,14 @@ export function Sidebar() {
         })}
       </nav>
 
-      <div className="flex items-center gap-3 border-t border-border px-4 py-4">
-        <UserButton
-          appearance={{ elements: { avatarBox: "h-8 w-8" } }}
-        />
-        <span className="text-sm text-muted">Account</span>
+      <div className="border-t border-border px-3 py-4">
+        <button
+          onClick={logout}
+          className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-muted transition-colors hover:bg-card-hover hover:text-foreground"
+        >
+          <span className="text-base">⏻</span>
+          Sign out
+        </button>
       </div>
     </aside>
   );

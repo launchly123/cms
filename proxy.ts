@@ -1,24 +1,34 @@
-import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { NextResponse, type NextRequest } from "next/server";
+import { OWNER_COOKIE, verifyOwnerToken } from "@/lib/ownerAuth";
 
-// /edit/* is the client-facing editor — it has its own password-based auth
-// (see lib/clientAuth.ts) and must NOT require a Clerk (owner) login.
-const isPublicRoute = createRouteMatcher([
-  "/sign-in(.*)",
-  "/sign-up(.*)",
-  "/edit(.*)",
-  "/api/client(.*)",
-  "/api/client-auth(.*)",
-]);
+// Public routes: the owner login itself, and the client-facing editor
+// (which has its own password gate in lib/clientAuth.ts).
+const PUBLIC = [
+  /^\/login(\/|$|\?)/,
+  /^\/edit(\/|$)/,
+  /^\/api\/client(\/|$)/,
+  /^\/api\/owner(\/|$)/,
+];
 
-export default clerkMiddleware(async (auth, request) => {
-  if (!isPublicRoute(request)) {
-    await auth.protect();
+export default async function middleware(req: NextRequest) {
+  const { pathname } = req.nextUrl;
+  if (PUBLIC.some((re) => re.test(pathname))) {
+    return NextResponse.next();
   }
-});
+
+  const ok = await verifyOwnerToken(req.cookies.get(OWNER_COOKIE)?.value);
+  if (ok) return NextResponse.next();
+
+  if (pathname.startsWith("/api")) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  const url = req.nextUrl.clone();
+  url.pathname = "/login";
+  url.search = `?next=${encodeURIComponent(pathname)}`;
+  return NextResponse.redirect(url);
+}
 
 export const config = {
-  matcher: [
-    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
-    "/(api|trpc)(.*)",
-  ],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };
