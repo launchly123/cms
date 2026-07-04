@@ -79,6 +79,9 @@ export function Editor({ slug, role }: { slug: string; role: Role }) {
   const [error, setError] = React.useState<string | null>(null);
   const [flash, setFlash] = useFlash();
 
+  const [aiInstruction, setAiInstruction] = React.useState("");
+  const [aiBusy, setAiBusy] = React.useState(false);
+
   const currentPage = doc?.type === "page" ? bundle?.pages.find((p) => p.id === doc.id) : undefined;
   const currentPost = doc?.type === "post" ? bundle?.posts.find((p) => p.id === doc.id) : undefined;
   const form = doc?.type === "page" ? pageForm : postForm;
@@ -259,6 +262,31 @@ export function Editor({ slug, role }: { slug: string; role: Role }) {
       setError("Couldn't publish. Please try again.");
     } finally {
       setPublishing(false);
+    }
+  }
+
+  async function runAiEdit() {
+    if (!pageForm || doc?.type !== "page" || !aiInstruction.trim()) return;
+    setAiBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/client/sites/${slug}/ai-edit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instruction: aiInstruction.trim(), page: pageForm }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(typeof data.error === "string" ? data.error : "The AI edit failed.");
+        return;
+      }
+      setPageForm(data.page);
+      setAiInstruction("");
+      setFlash("AI applied your change — review it, then Save");
+    } catch {
+      setError("Couldn't reach the AI. Check your connection.");
+    } finally {
+      setAiBusy(false);
     }
   }
 
@@ -610,18 +638,48 @@ export function Editor({ slug, role }: { slug: string; role: Role }) {
             )}
           </div>
 
-          {/* AI assistant — coming soon */}
+          {/* AI assistant */}
           <div className="border-t border-border p-4">
-            <div className="rounded-lg border border-border bg-background p-3">
-              <input
-                disabled
-                placeholder="Ask AI to change anything…"
-                className="w-full bg-transparent text-sm text-muted placeholder:text-muted/50 focus:outline-none"
-              />
-              <p className="mt-2 text-xs text-muted/70">
-                AI edits are coming next — an AI key needs to be added first.
+            {doc?.type === "page" ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  runAiEdit();
+                }}
+                className="rounded-lg border border-border bg-background p-3"
+              >
+                <textarea
+                  value={aiInstruction}
+                  onChange={(e) => setAiInstruction(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      runAiEdit();
+                    }
+                  }}
+                  rows={2}
+                  placeholder="Ask AI to change anything… e.g. “make the headline punchier”"
+                  className="w-full resize-none bg-transparent text-sm text-foreground placeholder:text-muted/50 focus:outline-none"
+                />
+                <div className="mt-2 flex items-center justify-between">
+                  <span className="text-xs text-muted/70">
+                    Edits the text on this page. Review, then Save.
+                  </span>
+                  <Button
+                    type="submit"
+                    className="h-7 px-3 text-xs"
+                    loading={aiBusy}
+                    disabled={!aiInstruction.trim()}
+                  >
+                    Send
+                  </Button>
+                </div>
+              </form>
+            ) : (
+              <p className="text-xs text-muted/70">
+                AI editing is available on pages. Open a page to use it.
               </p>
-            </div>
+            )}
           </div>
         </aside>
       </div>

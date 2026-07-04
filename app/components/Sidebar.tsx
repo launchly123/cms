@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 
 const nav = [
   { label: "Websites", href: "/", icon: "◈" },
+  { label: "Settings", href: "/settings", icon: "⚙" },
 ];
 
 export function Sidebar() {
@@ -21,9 +22,9 @@ export function Sidebar() {
     <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-card">
       <div className="flex h-16 items-center gap-2 border-b border-border px-5">
         <div className="flex h-7 w-7 items-center justify-center rounded-md bg-foreground text-sm font-bold text-[var(--accent-foreground)]">
-          C
+          ▲
         </div>
-        <span className="font-semibold tracking-tight">CMS Dashboard</span>
+        <span className="font-semibold tracking-tight">Agency Console</span>
       </div>
 
       <nav className="flex-1 px-3 py-4">
@@ -31,7 +32,8 @@ export function Sidebar() {
           Manage
         </p>
         {nav.map((item) => {
-          const active = pathname === item.href;
+          const active =
+            item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
           return (
             <Link
               key={item.href}

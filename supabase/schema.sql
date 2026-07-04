@@ -66,6 +66,19 @@ alter table public.pages add column if not exists draft jsonb;
 alter table public.pages add column if not exists seo_keyphrase text;
 alter table public.blog_posts add column if not exists draft jsonb;
 
+-- Owner-level app settings (AI provider/key, public client address). Single row.
+create table if not exists public.app_settings (
+  id int primary key default 1,
+  ai_provider text,            -- 'anthropic' | 'openrouter'
+  ai_model text,
+  ai_api_key text,             -- secret; never returned to the client
+  public_address text,
+  updated_at timestamptz not null default now(),
+  constraint app_settings_single_row check (id = 1)
+);
+-- Settings are read/written only via the CMS service role — lock out anon.
+alter table public.app_settings enable row level security;
+
 create index if not exists blog_posts_website_idx on public.blog_posts (website_id, created_at desc);
 create index if not exists pages_website_idx on public.pages (website_id);
 
