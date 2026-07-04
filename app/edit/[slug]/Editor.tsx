@@ -8,6 +8,7 @@ import { ImageDropzone } from "@/app/components/ImageDropzone";
 import { PageCanvas, PostCanvas } from "./Canvas";
 import { LiveSiteCanvas } from "./LiveSiteCanvas";
 import { SeoPanel } from "./SeoPanel";
+import { Tutorial, useTutorial } from "./Tutorial";
 import type { Selection } from "./selection";
 
 type Role = "owner" | "client";
@@ -81,6 +82,8 @@ export function Editor({ slug, role }: { slug: string; role: Role }) {
 
   const [aiInstruction, setAiInstruction] = React.useState("");
   const [aiBusy, setAiBusy] = React.useState(false);
+
+  const tutorial = useTutorial(bundle?.website.id ?? null);
 
   const currentPage = doc?.type === "page" ? bundle?.pages.find((p) => p.id === doc.id) : undefined;
   const currentPost = doc?.type === "post" ? bundle?.posts.find((p) => p.id === doc.id) : undefined;
@@ -476,6 +479,15 @@ export function Editor({ slug, role }: { slug: string; role: Role }) {
           Publish
         </Button>
 
+        <button
+          type="button"
+          onClick={tutorial.reopen}
+          title="How to use this editor"
+          className="flex h-8 w-8 items-center justify-center rounded-full border border-border text-sm text-muted transition-colors hover:bg-card-hover hover:text-foreground"
+        >
+          ?
+        </button>
+
         {role === "owner" && (
           <Link
             href="/"
@@ -696,6 +708,8 @@ export function Editor({ slug, role }: { slug: string; role: Role }) {
           onClose={() => setSeoOpen(false)}
         />
       )}
+
+      {tutorial.open && <Tutorial onClose={tutorial.dismiss} />}
     </div>
   );
 }
