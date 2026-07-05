@@ -51,6 +51,7 @@ export const pageDraftSchema = z.object({
   seo_title: z.string().max(200).nullable(),
   seo_description: z.string().max(500).nullable(),
   seo_keyphrase: z.string().max(100).nullable(),
+  overrides: z.record(z.string(), z.string().max(20000)).optional(),
 });
 
 /** Draft payload saved by the visual editor for a blog post. */

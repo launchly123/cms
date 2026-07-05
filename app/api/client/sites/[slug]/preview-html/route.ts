@@ -1,12 +1,24 @@
 import { apiError, handleApiError } from "@/lib/http";
 import { getEditorAccess } from "@/lib/clientAccess";
 
+function htmlResponse(body: string) {
+  return new Response(body, {
+    headers: { "Content-Type": "text/html; charset=utf-8" },
+  });
+}
+
+/** A friendly in-iframe message so the editor shows something instead of hanging. */
+function errorPage(message: string) {
+  return htmlResponse(
+    `<!doctype html><html><head><meta charset="utf-8"></head><body style="font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;color:#666;text-align:center;padding:2rem;background:#fff"><div><p style="font-weight:600;color:#333;margin:0 0 6px">Couldn't load the live site</p><p style="font-size:14px;max-width:22rem;margin:0">${message}</p></div></body></html>`
+  );
+}
+
 /**
- * Fetches the real live page for a website and returns it with a small
- * "editing bridge" script injected. That script finds the hero headline,
- * hero subheading and hero photo in the ACTUAL rendered page (not a
- * generic template) and makes them click-to-edit, resilient to the site
- * re-rendering itself (e.g. a language toggle) via a MutationObserver.
+ * Fetches the real live page for a website and returns it with an "editing
+ * bridge" script injected. The bridge makes EVERY text element and image on
+ * the page click-to-edit (keyed by document position), applies saved overrides,
+ * and re-applies them if the site re-renders itself (e.g. a language toggle).
  */
 export async function GET(
   req: Request,
@@ -23,136 +35,115 @@ export async function GET(
       return apiError(400, "no_domain");
     }
 
-    const url = new URL(req.url);
-    const pageId = url.searchParams.get("pageId") ?? "";
-    const heroHeading = url.searchParams.get("hero_heading") ?? "";
-    const heroSubheading = url.searchParams.get("hero_subheading") ?? "";
-    const heroImageUrl = url.searchParams.get("hero_image_url") ?? "";
-
     const target = `https://${website.domain}`;
+
+    // Fetch the live site with a hard timeout so a slow/cold site can't hang
+    // the editor forever — show a friendly message instead.
     let html: string;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
     try {
-      const res = await fetch(target, { cache: "no-store" });
-      if (!res.ok) return apiError(502, "site_unreachable");
+      const res = await fetch(target, {
+        cache: "no-store",
+        signal: controller.signal,
+        headers: { "User-Agent": "Mozilla/5.0 (CMS editor preview)" },
+      });
+      if (!res.ok) {
+        return errorPage(
+          `The site returned an error (${res.status}). Check that ${website.domain} is deployed and reachable.`
+        );
+      }
       html = await res.text();
     } catch {
-      return apiError(502, "site_unreachable");
+      return errorPage(
+        `${website.domain} didn't respond in time. It may be waking up — wait a moment and reopen the editor.`
+      );
+    } finally {
+      clearTimeout(timeout);
     }
-
-    const overrides = JSON.stringify({
-      pageId,
-      hero_heading: heroHeading || null,
-      hero_subheading: heroSubheading || null,
-      hero_image_url: heroImageUrl || null,
-    }).replace(/</g, "\\u003c");
 
     const bridge = `
 <style>
-  [data-cms-editing="true"] { outline: 2px solid transparent; cursor: text; transition: outline-color .15s; }
-  [data-cms-editing="true"]:hover { outline-color: rgba(56,189,248,.6); }
-  [data-cms-editing="true"]:focus { outline: 2px solid #0ea5e9; outline-offset: 1px; }
-  img[data-cms-editing="true"] { cursor: pointer; }
+  [data-cms-editing="true"]{outline:2px solid transparent;transition:outline-color .15s;}
+  [data-cms-editing="true"]:hover{outline:2px dashed rgba(56,189,248,.7);outline-offset:2px;cursor:text;}
+  [data-cms-editing="true"]:focus{outline:2px solid #0ea5e9;outline-offset:2px;}
+  img[data-cms-editing="true"]:hover{outline:2px dashed rgba(56,189,248,.9);cursor:pointer;}
 </style>
 <script>
 (function () {
-  var OVERRIDES = ${overrides};
-  var applied = false;
+  var overrides = {};
+  var SKIP = "header,nav,a,button,script,style,svg,select,textarea,input,form,iframe";
 
-  function firstVisible(list) {
-    for (var i = 0; i < list.length; i++) {
-      var el = list[i];
-      var r = el.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0) return el;
-    }
-    return null;
+  function isTextLeaf(el) {
+    if (el.childElementCount !== 0) return false;
+    if (!(el.textContent || "").trim()) return false;
+    if (el.closest(SKIP)) return false;
+    return /^(H1|H2|H3|H4|H5|H6|P|LI|BLOCKQUOTE|FIGCAPTION|TD|TH|SPAN|DIV|LABEL|EM|STRONG|SMALL|B|I)$/.test(el.tagName);
   }
 
-  function findHeroParts() {
-    var h1 = firstVisible(document.querySelectorAll("h1"));
-    if (!h1) return null;
-    // First substantial paragraph-like text after the h1, within the same section.
-    var section = h1.closest("section") || h1.parentElement;
-    var sub = null;
-    if (section) {
-      var candidates = section.querySelectorAll("p");
-      for (var i = 0; i < candidates.length; i++) {
-        var t = (candidates[i].textContent || "").trim();
-        if (t.length > 0) { sub = candidates[i]; break; }
+  function send(type, field, value) {
+    parent.postMessage({ source: "cms-editor", type: type, field: field, value: value }, "*");
+  }
+
+  var mo;
+  function tag() {
+    if (mo) mo.disconnect();
+    var all = document.body.getElementsByTagName("*");
+    var ti = 0, ii = 0;
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      if (el.tagName === "IMG") {
+        if (el.closest("header,nav")) continue;
+        var ik = "i" + (ii++);
+        el.setAttribute("data-cms-key", ik);
+        if (overrides[ik]) el.src = overrides[ik];
+        el.setAttribute("data-cms-editing", "true");
+        (function (node, key) {
+          node.onclick = function (ev) { ev.preventDefault(); ev.stopPropagation(); send("select-image", key, node.src); };
+        })(el, ik);
+      } else if (isTextLeaf(el)) {
+        var tk = "t" + (ti++);
+        el.setAttribute("data-cms-key", tk);
+        if (overrides[tk] != null) el.textContent = overrides[tk];
+        el.setAttribute("contenteditable", "true");
+        el.setAttribute("data-cms-editing", "true");
+        el.setAttribute("spellcheck", "false");
+        (function (node, key) {
+          node.oninput = function () { send("edit", key, node.textContent); };
+          node.onkeydown = function (ev) {
+            if (ev.key === "Enter" && node.tagName !== "DIV" && node.tagName !== "LI") { ev.preventDefault(); node.blur(); }
+          };
+        })(el, tk);
       }
     }
-    // Largest image within the hero section (by rendered area).
-    var img = null, best = 0;
-    var scope = section || document;
-    var imgs = scope.querySelectorAll("img");
-    for (var j = 0; j < imgs.length; j++) {
-      var r = imgs[j].getBoundingClientRect();
-      var area = r.width * r.height;
-      if (area > best) { best = area; img = imgs[j]; }
-    }
-    return { h1: h1, sub: sub, img: img };
-  }
-
-  function applyOverrides(parts) {
-    if (OVERRIDES.hero_heading && parts.h1) parts.h1.textContent = OVERRIDES.hero_heading;
-    if (OVERRIDES.hero_subheading && parts.sub) parts.sub.textContent = OVERRIDES.hero_subheading;
-    if (OVERRIDES.hero_image_url && parts.img) parts.img.src = OVERRIDES.hero_image_url;
-  }
-
-  function bind() {
-    var parts = findHeroParts();
-    if (!parts || !parts.h1) return;
-    applyOverrides(parts);
-
-    parts.h1.setAttribute("contenteditable", "true");
-    parts.h1.setAttribute("data-cms-editing", "true");
-    parts.h1.oninput = function () {
-      parent.postMessage({ source: "cms-editor", type: "edit", field: "hero_heading", value: parts.h1.textContent }, "*");
-    };
-
-    if (parts.sub) {
-      parts.sub.setAttribute("contenteditable", "true");
-      parts.sub.setAttribute("data-cms-editing", "true");
-      parts.sub.oninput = function () {
-        parent.postMessage({ source: "cms-editor", type: "edit", field: "hero_subheading", value: parts.sub.textContent }, "*");
-      };
-    }
-
-    if (parts.img) {
-      parts.img.setAttribute("data-cms-editing", "true");
-      parts.img.onclick = function (e) {
-        e.preventDefault();
-        parent.postMessage({ source: "cms-editor", type: "select-image", field: "hero_image_url" }, "*");
-      };
-    }
-
-    applied = true;
+    if (mo) mo.observe(document.body, { childList: true, subtree: true });
   }
 
   window.addEventListener("message", function (e) {
     if (!e.data || e.data.source !== "cms-editor-parent") return;
-    if (e.data.type === "set-image" && e.data.field === "hero_image_url") {
-      OVERRIDES.hero_image_url = e.data.value;
-      var parts = findHeroParts();
-      if (parts && parts.img) parts.img.src = e.data.value;
+    if (e.data.type === "apply-overrides") { overrides = e.data.overrides || {}; tag(); }
+    else if (e.data.type === "set-image") {
+      overrides[e.data.field] = e.data.value;
+      var el = document.querySelector('[data-cms-key="' + e.data.field + '"]');
+      if (el) el.src = e.data.value;
     }
   });
 
-  // The real site may re-render itself (e.g. a language toggle) — watch
-  // for that and reapply our edits + bindings so they aren't lost.
-  var mo = new MutationObserver(function () {
-    if (document.activeElement && document.activeElement.hasAttribute("data-cms-editing")) return;
-    bind();
+  var reapply;
+  mo = new MutationObserver(function () {
+    var a = document.activeElement;
+    if (a && a.getAttribute && a.getAttribute("data-cms-editing") === "true") return;
+    clearTimeout(reapply); reapply = setTimeout(tag, 120);
   });
-  mo.observe(document.body, { childList: true, subtree: true });
 
-  setTimeout(bind, 50);
-  window.addEventListener("load", bind);
+  function boot() { tag(); parent.postMessage({ source: "cms-editor", type: "ready" }, "*"); }
+  setTimeout(boot, 80);
+  window.addEventListener("load", boot);
 })();
 </script>
 </body>`;
 
-    // <base> must land in <head>, before any relative resource is parsed,
-    // so relative asset URLs resolve against the real site, not our origin.
+    // <base> must land in <head>, before any relative resource is parsed.
     const baseTag = `<base href="${target}/">`;
     const withBase = /<head[^>]*>/i.test(html)
       ? html.replace(/<head[^>]*>/i, (m) => `${m}${baseTag}`)
@@ -162,9 +153,7 @@ export async function GET(
       ? withBase.replace("</body>", bridge)
       : withBase + bridge;
 
-    return new Response(injected, {
-      headers: { "Content-Type": "text/html; charset=utf-8" },
-    });
+    return htmlResponse(injected);
   } catch (e) {
     return handleApiError(e);
   }

@@ -65,6 +65,8 @@ create table if not exists public.contacts (
 alter table public.pages add column if not exists draft jsonb;
 alter table public.pages add column if not exists seo_keyphrase text;
 alter table public.blog_posts add column if not exists draft jsonb;
+-- Published text/image overrides for arbitrary elements on a live (non-template) site
+alter table public.pages add column if not exists content_overrides jsonb;
 
 -- Owner-level app settings (AI provider/key, public client address). Single row.
 create table if not exists public.app_settings (

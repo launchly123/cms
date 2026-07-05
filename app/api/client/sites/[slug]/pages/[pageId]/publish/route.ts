@@ -33,24 +33,38 @@ export async function POST(
     }
 
     const d = page.draft;
-    const { data, error } = await supabaseAdmin()
-      .from("pages")
-      .update({
-        title: d.title,
-        hero_heading: d.hero_heading,
-        hero_subheading: d.hero_subheading,
-        hero_image_url: d.hero_image_url,
-        content: d.content,
-        seo_title: d.seo_title,
-        seo_description: d.seo_description,
-        seo_keyphrase: d.seo_keyphrase,
-        draft: null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("website_id", website.id)
-      .eq("id", pageId)
-      .select("*")
-      .single();
+    const baseUpdate = {
+      title: d.title,
+      hero_heading: d.hero_heading,
+      hero_subheading: d.hero_subheading,
+      hero_image_url: d.hero_image_url,
+      content: d.content,
+      seo_title: d.seo_title,
+      seo_description: d.seo_description,
+      seo_keyphrase: d.seo_keyphrase,
+      draft: null,
+      updated_at: new Date().toISOString(),
+    };
+
+    async function applyUpdate(withOverrides: boolean) {
+      return supabaseAdmin()
+        .from("pages")
+        .update(
+          withOverrides
+            ? { ...baseUpdate, content_overrides: d.overrides ?? null }
+            : baseUpdate
+        )
+        .eq("website_id", website.id)
+        .eq("id", pageId)
+        .select("*")
+        .single();
+    }
+
+    let { data, error } = await applyUpdate(true);
+    // Gracefully degrade if the content_overrides column hasn't been migrated.
+    if (error && /content_overrides/.test(error.message ?? "")) {
+      ({ data, error } = await applyUpdate(false));
+    }
     if (error) throw error;
 
     let revalidated = false;

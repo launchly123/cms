@@ -33,6 +33,8 @@ export interface Page {
   seo_title: string | null;
   seo_description: string | null;
   seo_keyphrase?: string | null;
+  /** Published text/image overrides for arbitrary elements on a live (non-template) site. */
+  content_overrides?: Record<string, string> | null;
   draft?: PageDraft | null;
   updated_at: string;
 }
@@ -47,6 +49,8 @@ export interface PageDraft {
   seo_title: string | null;
   seo_description: string | null;
   seo_keyphrase: string | null;
+  /** Arbitrary text/image overrides keyed by a stable position-based element id. */
+  overrides?: Record<string, string>;
 }
 
 export interface PostDraft {

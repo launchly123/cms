@@ -43,6 +43,7 @@ function toPageForm(page: Page): PageDraft {
     seo_title: d?.seo_title ?? page.seo_title,
     seo_description: d?.seo_description ?? page.seo_description,
     seo_keyphrase: d?.seo_keyphrase ?? page.seo_keyphrase ?? null,
+    overrides: d?.overrides ?? page.content_overrides ?? {},
   };
 }
 
@@ -523,14 +524,6 @@ export function Editor({ slug, role }: { slug: string; role: Role }) {
                 pageId={doc.id}
                 form={pageForm}
                 update={(patch) => setPageForm((f) => (f ? { ...f, ...patch } : f))}
-                onImageClick={() =>
-                  setSelected({
-                    kind: "image",
-                    label: "Hero image",
-                    target: "page",
-                    field: "hero_image_url",
-                  })
-                }
               />
             )}
 
