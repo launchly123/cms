@@ -8,6 +8,7 @@ const PUBLIC = [
   /^\/edit(\/|$)/,
   /^\/api\/client(\/|$)/,
   /^\/api\/owner(\/|$)/,
+  /^\/api\/public(\/|$)/,
 ];
 
 export default async function middleware(req: NextRequest) {
