@@ -18,6 +18,8 @@ interface SettingsData {
   ai_provider: "anthropic" | "openrouter" | null;
   ai_model: string | null;
   ai_configured: boolean;
+  ai_daily_limit: number;
+  ai_daily_count: number;
   public_address: string | null;
 }
 
@@ -39,9 +41,10 @@ export default function SettingsPage() {
   const [status, setStatus] = React.useState({ database: false, vercel: false, ai: false });
 
   // AI editing form
-  const [provider, setProvider] = React.useState<"anthropic" | "openrouter">("anthropic");
-  const [model, setModel] = React.useState("claude-opus-4-8");
+  const [provider, setProvider] = React.useState<"anthropic" | "openrouter">("openrouter");
+  const [model, setModel] = React.useState("deepseek/deepseek-r1:free");
   const [apiKey, setApiKey] = React.useState("");
+  const [dailyLimit, setDailyLimit] = React.useState(50);
   const [savingAi, setSavingAi] = React.useState(false);
 
   // Public address
@@ -73,6 +76,7 @@ export default function SettingsPage() {
         setStatus(data.status);
         if (s.ai_provider) setProvider(s.ai_provider);
         if (s.ai_model) setModel(s.ai_model);
+        if (s.ai_daily_limit) setDailyLimit(s.ai_daily_limit);
         setPublicAddress(s.public_address ?? "");
       } catch {
         if (!cancelled) setError("Couldn't load settings. Refresh to try again.");
@@ -89,7 +93,11 @@ export default function SettingsPage() {
     setSavingAi(true);
     setError(null);
     try {
-      const body: Record<string, unknown> = { ai_provider: provider, ai_model: model.trim() };
+      const body: Record<string, unknown> = {
+        ai_provider: provider,
+        ai_model: model.trim(),
+        ai_daily_limit: dailyLimit,
+      };
       if (apiKey.trim()) body.ai_api_key = apiKey.trim();
       const res = await fetch("/api/settings", {
         method: "PUT",
@@ -172,7 +180,7 @@ export default function SettingsPage() {
   }
 
   const modelPlaceholder =
-    provider === "anthropic" ? "claude-opus-4-8" : "anthropic/claude-sonnet-4.5";
+    provider === "anthropic" ? "claude-opus-4-8" : "deepseek/deepseek-r1:free";
   const keyPlaceholder = provider === "anthropic" ? "sk-ant-…" : "sk-or-…";
 
   return (
@@ -220,7 +228,7 @@ export default function SettingsPage() {
                 type="button"
                 onClick={() => {
                   setProvider(p);
-                  setModel(p === "anthropic" ? "claude-opus-4-8" : "anthropic/claude-sonnet-4.5");
+                  setModel(p === "anthropic" ? "claude-opus-4-8" : "deepseek/deepseek-r1:free");
                 }}
                 className={`rounded-lg border p-3 text-left transition-colors ${
                   provider === p
@@ -232,11 +240,29 @@ export default function SettingsPage() {
                   {p === "anthropic" ? "Anthropic" : "OpenRouter"}
                 </div>
                 <div className="text-xs text-muted">
-                  {p === "anthropic" ? "Claude — direct" : "Claude + many models"}
+                  {p === "anthropic" ? "Claude — direct, paid" : "Free models available — no card"}
                 </div>
               </button>
             ))}
           </div>
+
+          {provider === "openrouter" && (
+            <p className="mb-4 text-xs text-muted">
+              OpenRouter has genuinely free models (no credit card, no charges).
+              Get a key at{" "}
+              <a
+                href="https://openrouter.ai/keys"
+                target="_blank"
+                rel="noreferrer"
+                className="underline hover:text-foreground"
+              >
+                openrouter.ai/keys
+              </a>
+              . Free models are limited to ~50 requests/day (1,000/day if you
+              ever add $10 in credit) — the daily limit below keeps you safely
+              under that.
+            </p>
+          )}
 
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="API key" hint={settings?.ai_configured ? "A key is saved. Enter a new one to replace it." : undefined}>
@@ -255,6 +281,39 @@ export default function SettingsPage() {
               />
             </Field>
           </div>
+
+          <div className="mt-4">
+            <Field
+              label="Daily edit limit"
+              hint="Once this many AI edits happen in a day, the editor shows a warning and stops until midnight."
+            >
+              <Input
+                type="number"
+                min={1}
+                value={dailyLimit}
+                onChange={(e) => setDailyLimit(Math.max(1, Number(e.target.value) || 1))}
+                className="max-w-[10rem]"
+              />
+            </Field>
+            {settings && (
+              <p className="mt-2 text-xs text-muted">
+                Used today:{" "}
+                <span
+                  className={
+                    settings.ai_daily_count >= settings.ai_daily_limit
+                      ? "text-red-400"
+                      : settings.ai_daily_count / Math.max(1, settings.ai_daily_limit) >= 0.8
+                        ? "text-amber-400"
+                        : "text-foreground"
+                  }
+                >
+                  {settings.ai_daily_count}/{settings.ai_daily_limit}
+                </span>{" "}
+                — resets at midnight.
+              </p>
+            )}
+          </div>
+
           <div className="mt-4 flex justify-end">
             <Button loading={savingAi} onClick={saveAi}>
               Save key

@@ -27,6 +27,7 @@ const updateSchema = z.object({
   ai_provider: z.enum(["anthropic", "openrouter"]).nullable().optional(),
   ai_model: z.string().trim().max(200).nullable().optional(),
   ai_api_key: z.string().max(500).optional(), // "" clears; omitted keeps
+  ai_daily_limit: z.number().int().min(1).max(100000).optional(),
   public_address: z.string().trim().max(300).nullable().optional(),
 });
 

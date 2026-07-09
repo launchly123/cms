@@ -6,6 +6,9 @@ export interface AppSettings {
   ai_provider: AiProvider | null;
   ai_model: string | null;
   ai_api_key: string | null;
+  ai_daily_limit: number;
+  ai_daily_count: number;
+  ai_daily_date: string | null; // YYYY-MM-DD
   public_address: string | null;
 }
 
@@ -14,6 +17,8 @@ export interface PublicSettings {
   ai_provider: AiProvider | null;
   ai_model: string | null;
   ai_configured: boolean;
+  ai_daily_limit: number;
+  ai_daily_count: number;
   public_address: string | null;
 }
 
@@ -21,32 +26,51 @@ const DEFAULTS: AppSettings = {
   ai_provider: null,
   ai_model: null,
   ai_api_key: null,
+  ai_daily_limit: 50,
+  ai_daily_count: 0,
+  ai_daily_date: null,
   public_address: null,
 };
 
-/** Postgres/PostgREST "relation does not exist" — the migration hasn't run. */
-function isMissingTable(error: { code?: string; message?: string } | null): boolean {
+function today(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/** Postgres/PostgREST "relation/column does not exist" — the migration hasn't run. */
+function isMissingSchema(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false;
   return (
     error.code === "42P01" ||
+    error.code === "42703" ||
     error.code === "PGRST205" ||
-    /app_settings/.test(error.message ?? "") && /(does not exist|schema cache)/i.test(error.message ?? "")
+    (/app_settings/.test(error.message ?? "") &&
+      /(does not exist|schema cache)/i.test(error.message ?? ""))
   );
 }
 
-/** Full settings incl. the secret key — server-side only, never send to client. */
+/**
+ * Full settings incl. the secret key — server-side only, never send to client.
+ * Automatically zeroes ai_daily_count when the stored date isn't today.
+ */
 export async function getSettings(): Promise<AppSettings> {
   const { data, error } = await supabaseAdmin()
     .from("app_settings")
-    .select("ai_provider, ai_model, ai_api_key, public_address")
+    .select(
+      "ai_provider, ai_model, ai_api_key, ai_daily_limit, ai_daily_count, ai_daily_date, public_address"
+    )
     .eq("id", 1)
     .maybeSingle();
   // Before the migration runs, behave as "nothing configured yet".
   if (error) {
-    if (isMissingTable(error)) return { ...DEFAULTS };
+    if (isMissingSchema(error)) return { ...DEFAULTS };
     throw error;
   }
-  return { ...DEFAULTS, ...(data ?? {}) } as AppSettings;
+  const merged = { ...DEFAULTS, ...(data ?? {}) } as AppSettings;
+  if (merged.ai_daily_date !== today()) {
+    merged.ai_daily_count = 0;
+    merged.ai_daily_date = today();
+  }
+  return merged;
 }
 
 export function toPublicSettings(s: AppSettings): PublicSettings {
@@ -54,6 +78,8 @@ export function toPublicSettings(s: AppSettings): PublicSettings {
     ai_provider: s.ai_provider,
     ai_model: s.ai_model,
     ai_configured: Boolean(s.ai_api_key),
+    ai_daily_limit: s.ai_daily_limit,
+    ai_daily_count: s.ai_daily_date === today() ? s.ai_daily_count : 0,
     public_address: s.public_address,
   };
 }
@@ -69,10 +95,12 @@ export async function updateSettings(patch: {
   ai_provider?: AiProvider | null;
   ai_model?: string | null;
   ai_api_key?: string | null;
+  ai_daily_limit?: number;
   public_address?: string | null;
 }): Promise<PublicSettings> {
   const current = await getSettings();
   const merged: AppSettings = {
+    ...current,
     ai_provider: patch.ai_provider ?? current.ai_provider,
     ai_model: patch.ai_model ?? current.ai_model,
     ai_api_key:
@@ -81,6 +109,10 @@ export async function updateSettings(patch: {
         : patch.ai_api_key === ""
           ? null
           : patch.ai_api_key,
+    ai_daily_limit:
+      patch.ai_daily_limit !== undefined && patch.ai_daily_limit > 0
+        ? Math.floor(patch.ai_daily_limit)
+        : current.ai_daily_limit,
     public_address:
       patch.public_address === undefined
         ? current.public_address
@@ -95,4 +127,36 @@ export async function updateSettings(patch: {
     );
   if (error) throw error;
   return toPublicSettings(merged);
+}
+
+export interface UsageCheck {
+  allowed: boolean;
+  count: number;
+  limit: number;
+}
+
+/**
+ * Atomically-enough check-and-increment for today's AI usage counter.
+ * Call BEFORE running the AI edit; only persists the increment on success.
+ */
+export async function checkAndReserveAiUsage(): Promise<UsageCheck> {
+  const settings = await getSettings();
+  if (settings.ai_daily_count >= settings.ai_daily_limit) {
+    return { allowed: false, count: settings.ai_daily_count, limit: settings.ai_daily_limit };
+  }
+  const nextCount = settings.ai_daily_count + 1;
+  const { error } = await supabaseAdmin()
+    .from("app_settings")
+    .upsert(
+      {
+        id: 1,
+        ...settings,
+        ai_daily_count: nextCount,
+        ai_daily_date: today(),
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "id" }
+    );
+  if (error && !isMissingSchema(error)) throw error;
+  return { allowed: true, count: nextCount, limit: settings.ai_daily_limit };
 }

@@ -83,6 +83,8 @@ export function Editor({ slug, role }: { slug: string; role: Role }) {
 
   const [aiInstruction, setAiInstruction] = React.useState("");
   const [aiBusy, setAiBusy] = React.useState(false);
+  const [aiUsage, setAiUsage] = React.useState<{ count: number; limit: number } | null>(null);
+  const [aiLimitReached, setAiLimitReached] = React.useState(false);
 
   const tutorial = useTutorial(bundle?.website.id ?? null);
 
@@ -281,11 +283,13 @@ export function Editor({ slug, role }: { slug: string; role: Role }) {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        if (res.status === 429) setAiLimitReached(true);
         setError(typeof data.error === "string" ? data.error : "The AI edit failed.");
         return;
       }
       setPageForm(data.page);
       setAiInstruction("");
+      if (data.usage) setAiUsage(data.usage);
       setFlash("AI applied your change — review it, then Save");
     } catch {
       setError("Couldn't reach the AI. Check your connection.");
@@ -663,8 +667,13 @@ export function Editor({ slug, role }: { slug: string; role: Role }) {
                     }
                   }}
                   rows={2}
-                  placeholder="Ask AI to change anything… e.g. “make the headline punchier”"
-                  className="w-full resize-none bg-transparent text-sm text-foreground placeholder:text-muted/50 focus:outline-none"
+                  disabled={aiLimitReached}
+                  placeholder={
+                    aiLimitReached
+                      ? "Daily free AI limit reached — resets at midnight"
+                      : "Ask AI to change anything… e.g. “make the headline punchier”"
+                  }
+                  className="w-full resize-none bg-transparent text-sm text-foreground placeholder:text-muted/50 focus:outline-none disabled:cursor-not-allowed"
                 />
                 <div className="mt-2 flex items-center justify-between">
                   <span className="text-xs text-muted/70">
@@ -674,11 +683,27 @@ export function Editor({ slug, role }: { slug: string; role: Role }) {
                     type="submit"
                     className="h-7 px-3 text-xs"
                     loading={aiBusy}
-                    disabled={!aiInstruction.trim()}
+                    disabled={!aiInstruction.trim() || aiLimitReached}
                   >
                     Send
                   </Button>
                 </div>
+                {aiUsage && (
+                  <p
+                    className={`mt-2 text-xs ${
+                      aiUsage.count >= aiUsage.limit
+                        ? "text-red-400"
+                        : aiUsage.count / aiUsage.limit >= 0.8
+                          ? "text-amber-400"
+                          : "text-muted/70"
+                    }`}
+                  >
+                    {aiUsage.count}/{aiUsage.limit} free AI edits used today
+                    {aiUsage.count / aiUsage.limit >= 0.8 && aiUsage.count < aiUsage.limit
+                      ? " — almost at today's limit"
+                      : ""}
+                  </p>
+                )}
               </form>
             ) : (
               <p className="text-xs text-muted/70">

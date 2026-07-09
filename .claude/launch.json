@@ -6,6 +6,14 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
       "port": 3000
+    },
+    {
+      "name": "preview-static",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "C:\\Users\\phili\\AppData\\Local\\Temp\\claude\\C--Users-phili-OneDrive-Escritorio-cms\\110594ae-37ce-44cf-90d8-984245f50726\\scratchpad\\static-server.mjs"
+      ],
+      "port": 8099
     }
   ]
 }

@@ -3,7 +3,7 @@ import { apiError, handleApiError } from "@/lib/http";
 import { parseJson, pageDraftSchema } from "@/lib/validation";
 import { z } from "zod";
 import { getEditorAccess } from "@/lib/clientAccess";
-import { getSettings } from "@/lib/settings";
+import { checkAndReserveAiUsage, getSettings } from "@/lib/settings";
 import { aiConfigured, aiEditPage } from "@/lib/ai";
 
 const bodySchema = z.object({
@@ -13,7 +13,8 @@ const bodySchema = z.object({
 
 /**
  * Apply a natural-language edit to a page draft via the configured AI provider.
- * Returns the updated draft — the client saves it like any other draft.
+ * Returns the updated draft plus today's usage — the client saves the draft
+ * like any other draft and shows a warning as usage nears the daily limit.
  */
 export async function POST(
   req: Request,
@@ -34,6 +35,15 @@ export async function POST(
       );
     }
 
+    const usage = await checkAndReserveAiUsage();
+    if (!usage.allowed) {
+      return apiError(
+        429,
+        `You've used all ${usage.limit} free AI edits for today. It resets at midnight — or raise the daily limit in Settings.`,
+        undefined
+      );
+    }
+
     const parsed = await parseJson(req, bodySchema);
     if (parsed.error) {
       return apiError(400, parsed.error.message, parsed.error.issues);
@@ -45,7 +55,10 @@ export async function POST(
         parsed.data.instruction,
         parsed.data.page
       );
-      return NextResponse.json({ page: updated });
+      return NextResponse.json({
+        page: updated,
+        usage: { count: usage.count, limit: usage.limit },
+      });
     } catch (e) {
       console.error("[ai-edit]", e);
       return apiError(

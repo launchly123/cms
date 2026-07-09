@@ -74,10 +74,16 @@ create table if not exists public.app_settings (
   ai_provider text,            -- 'anthropic' | 'openrouter'
   ai_model text,
   ai_api_key text,             -- secret; never returned to the client
+  ai_daily_limit int not null default 50,   -- warn/block once this many AI edits are used in a day
+  ai_daily_count int not null default 0,
+  ai_daily_date date,                        -- date ai_daily_count applies to; resets on a new day
   public_address text,
   updated_at timestamptz not null default now(),
   constraint app_settings_single_row check (id = 1)
 );
+alter table public.app_settings add column if not exists ai_daily_limit int not null default 50;
+alter table public.app_settings add column if not exists ai_daily_count int not null default 0;
+alter table public.app_settings add column if not exists ai_daily_date date;
 -- Settings are read/written only via the CMS service role — lock out anon.
 alter table public.app_settings enable row level security;
 
