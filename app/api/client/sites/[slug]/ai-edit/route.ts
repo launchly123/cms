@@ -3,7 +3,7 @@ import { apiError, handleApiError } from "@/lib/http";
 import { parseJson, pageDraftSchema } from "@/lib/validation";
 import { z } from "zod";
 import { getEditorAccess } from "@/lib/clientAccess";
-import { checkAndReserveAiUsage, getSettings } from "@/lib/settings";
+import { incrementAiUsage, peekAiUsage, getSettings } from "@/lib/settings";
 import { aiConfigured, aiEditPage } from "@/lib/ai";
 
 const bodySchema = z.object({
@@ -35,12 +35,11 @@ export async function POST(
       );
     }
 
-    const usage = await checkAndReserveAiUsage();
+    const usage = await peekAiUsage();
     if (!usage.allowed) {
       return apiError(
         429,
-        `You've used all ${usage.limit} free AI edits for today. It resets at midnight — or raise the daily limit in Settings.`,
-        undefined
+        `You've used all ${usage.limit} free AI edits for today. It resets at midnight — or raise the daily limit in Settings.`
       );
     }
 
@@ -55,9 +54,11 @@ export async function POST(
         parsed.data.instruction,
         parsed.data.page
       );
+      // Only a successful edit costs part of the daily free quota.
+      const newUsage = await incrementAiUsage();
       return NextResponse.json({
         page: updated,
-        usage: { count: usage.count, limit: usage.limit },
+        usage: { count: newUsage.count, limit: newUsage.limit },
       });
     } catch (e) {
       console.error("[ai-edit]", e);

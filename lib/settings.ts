@@ -135,15 +135,23 @@ export interface UsageCheck {
   limit: number;
 }
 
-/**
- * Atomically-enough check-and-increment for today's AI usage counter.
- * Call BEFORE running the AI edit; only persists the increment on success.
- */
-export async function checkAndReserveAiUsage(): Promise<UsageCheck> {
+/** Read-only check — does NOT consume a usage slot. Call before running the AI edit. */
+export async function peekAiUsage(): Promise<UsageCheck> {
   const settings = await getSettings();
-  if (settings.ai_daily_count >= settings.ai_daily_limit) {
-    return { allowed: false, count: settings.ai_daily_count, limit: settings.ai_daily_limit };
-  }
+  return {
+    allowed: settings.ai_daily_count < settings.ai_daily_limit,
+    count: settings.ai_daily_count,
+    limit: settings.ai_daily_limit,
+  };
+}
+
+/**
+ * Persist +1 on today's usage counter. Call ONLY after a successful AI edit —
+ * failed attempts (bad model, provider error, etc.) must not cost the client
+ * part of their daily free quota.
+ */
+export async function incrementAiUsage(): Promise<UsageCheck> {
+  const settings = await getSettings();
   const nextCount = settings.ai_daily_count + 1;
   const { error } = await supabaseAdmin()
     .from("app_settings")
