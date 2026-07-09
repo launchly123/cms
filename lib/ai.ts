@@ -6,7 +6,7 @@ export function aiConfigured(s: AppSettings): boolean {
   return Boolean(s.ai_provider && s.ai_api_key && s.ai_model);
 }
 
-/** The editable slice of a page we let the AI rewrite (no images, no slug). */
+/** The editable slice of a page we let the AI read/rewrite (no images, no slug). */
 interface EditableContent {
   title: string;
   hero_heading: string;
@@ -15,6 +15,11 @@ interface EditableContent {
   seo_title: string;
   seo_description: string;
   seo_keyphrase: string;
+}
+
+interface AiResult {
+  reply: string;
+  content: EditableContent;
 }
 
 function toEditable(page: PageDraft): EditableContent {
@@ -53,22 +58,50 @@ function applyEditable(page: PageDraft, edited: EditableContent): PageDraft {
   };
 }
 
-const SYSTEM_PROMPT = `You are a website content editor inside a CMS. You receive the current page content as JSON and an instruction from the user. Apply the instruction and return the UPDATED content.
+const SYSTEM_PROMPT = `You are a friendly assistant built into a website's content editor. You chat with a non-technical client who is editing their site's text.
 
-Rules:
-- Return ONLY a single JSON object, no prose, no markdown fences.
-- Keep the exact same JSON shape and keys you were given.
-- Keep every section's "id" unchanged. Do not add or remove sections unless the instruction explicitly asks.
-- Only change text. Do not invent URLs or images.
-- Write natural, polished marketing copy that fits the site.`;
+What you can see: only this page's TEXT — title, hero heading/subheading, section headings/bodies, and SEO fields (given to you as JSON).
+What you CANNOT see: the site's visual design — fonts, colors, layout, spacing, images, or CSS. If asked about any of those, say plainly that you can only see and edit the page's text content, not its design, so you can't answer that — then offer to help with the text instead. Never guess or make up an answer about the design.
 
-function extractJson(text: string): unknown {
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start === -1 || end === -1 || end < start) {
-    throw new Error("ai_no_json");
+Behavior:
+- If the user asks a question or is just chatting, answer conversationally in "reply" and leave "content" IDENTICAL to what you were given (change nothing).
+- If the user asks you to change/write/edit something, make that change in "content" and put a short, friendly one-sentence confirmation in "reply" (e.g. "Done — I made the headline punchier.").
+- Keep "content"'s keys and shape exactly as given. Keep every section's "id" unchanged. Do not add or remove sections unless explicitly asked. Don't invent URLs or images.
+- Match the site's existing language and tone when writing copy.
+- Keep "reply" short — one or two sentences, plain text, no markdown.
+
+Always respond with ONLY a single JSON object, no prose outside it, no markdown fences, in exactly this shape:
+{"reply": "<your chat message>", "content": { "title": "...", "hero_heading": "...", "hero_subheading": "...", "sections": [...], "seo_title": "...", "seo_description": "...", "seo_keyphrase": "..." }}`;
+
+/** Try hard to get {reply, content} out of a model response, however messy. */
+function parseAiResult(raw: string, fallback: EditableContent): AiResult {
+  const candidates: string[] = [raw.trim()];
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start !== -1 && end !== -1 && end > start) {
+    candidates.push(raw.slice(start, end + 1));
   }
-  return JSON.parse(text.slice(start, end + 1));
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === "object") {
+        const reply = typeof parsed.reply === "string" ? parsed.reply : "";
+        const content =
+          parsed.content && typeof parsed.content === "object"
+            ? (parsed.content as EditableContent)
+            : fallback;
+        if (!Array.isArray(content.sections)) content.sections = fallback.sections;
+        if (reply || parsed.content) return { reply: reply || "Done.", content };
+      }
+    } catch {
+      // try next candidate
+    }
+  }
+
+  // Model ignored the JSON format entirely — treat its whole reply as a chat
+  // answer and leave the page untouched, so questions still get answered.
+  return { reply: raw.trim() || "I didn't quite catch that — could you rephrase?", content: fallback };
 }
 
 async function callAnthropic(
@@ -115,28 +148,27 @@ async function callOpenRouter(
 }
 
 /**
- * Apply a natural-language instruction to a page's content via the configured
- * AI provider. Returns the updated draft (images and slug preserved).
+ * Chat with the AI about this page. Answers questions conversationally and/or
+ * applies a requested edit — either way, the client always gets something to
+ * read back. Returns the (possibly updated) draft plus the chat reply.
  */
 export async function aiEditPage(
   settings: AppSettings,
   instruction: string,
   page: PageDraft
-): Promise<PageDraft> {
+): Promise<{ reply: string; page: PageDraft }> {
   const editable = toEditable(page);
   const userContent = `Current page content:\n${JSON.stringify(
     editable,
     null,
     2
-  )}\n\nInstruction:\n${instruction}\n\nReturn the updated JSON object.`;
+  )}\n\nUser message:\n${instruction}\n\nRespond with the JSON object described in your instructions.`;
 
   const raw =
     settings.ai_provider === "openrouter"
       ? await callOpenRouter(settings, userContent)
       : await callAnthropic(settings, userContent);
 
-  const parsed = extractJson(raw) as EditableContent;
-  // Defensive: ensure sections is an array.
-  if (!Array.isArray(parsed.sections)) parsed.sections = editable.sections;
-  return applyEditable(page, parsed);
+  const { reply, content } = parseAiResult(raw, editable);
+  return { reply, page: applyEditable(page, content) };
 }

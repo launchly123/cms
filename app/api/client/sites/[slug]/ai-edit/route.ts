@@ -49,22 +49,23 @@ export async function POST(
     }
 
     try {
-      const updated = await aiEditPage(
+      const { reply, page } = await aiEditPage(
         settings,
         parsed.data.instruction,
         parsed.data.page
       );
-      // Only a successful edit costs part of the daily free quota.
+      // Only a successful call costs part of the daily free quota.
       const newUsage = await incrementAiUsage();
       return NextResponse.json({
-        page: updated,
+        reply,
+        page,
         usage: { count: newUsage.count, limit: newUsage.limit },
       });
     } catch (e) {
       console.error("[ai-edit]", e);
       return apiError(
         502,
-        "The AI couldn't complete that edit. Try rephrasing, or check your AI key in Settings."
+        "The AI didn't respond. Try again, or check your AI key in Settings."
       );
     }
   } catch (e) {

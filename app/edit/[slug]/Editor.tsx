@@ -85,6 +85,14 @@ export function Editor({ slug, role }: { slug: string; role: Role }) {
   const [aiBusy, setAiBusy] = React.useState(false);
   const [aiUsage, setAiUsage] = React.useState<{ count: number; limit: number } | null>(null);
   const [aiLimitReached, setAiLimitReached] = React.useState(false);
+  const [aiMessages, setAiMessages] = React.useState<
+    { role: "user" | "assistant" | "error"; text: string }[]
+  >([]);
+  const aiScrollRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    aiScrollRef.current?.scrollTo({ top: aiScrollRef.current.scrollHeight });
+  }, [aiMessages]);
 
   const tutorial = useTutorial(bundle?.website.id ?? null);
 
@@ -273,26 +281,33 @@ export function Editor({ slug, role }: { slug: string; role: Role }) {
 
   async function runAiEdit() {
     if (!pageForm || doc?.type !== "page" || !aiInstruction.trim()) return;
+    const userText = aiInstruction.trim();
+    setAiMessages((m) => [...m, { role: "user", text: userText }]);
+    setAiInstruction("");
     setAiBusy(true);
-    setError(null);
     try {
       const res = await fetch(`/api/client/sites/${slug}/ai-edit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ instruction: aiInstruction.trim(), page: pageForm }),
+        body: JSON.stringify({ instruction: userText, page: pageForm }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         if (res.status === 429) setAiLimitReached(true);
-        setError(typeof data.error === "string" ? data.error : "The AI edit failed.");
+        const msg = typeof data.error === "string" ? data.error : "The AI didn't respond. Try again.";
+        setAiMessages((m) => [...m, { role: "error", text: msg }]);
         return;
       }
+      const changed = JSON.stringify(data.page) !== JSON.stringify(pageForm);
       setPageForm(data.page);
-      setAiInstruction("");
       if (data.usage) setAiUsage(data.usage);
-      setFlash("AI applied your change — review it, then Save");
+      setAiMessages((m) => [
+        ...m,
+        { role: "assistant", text: data.reply || (changed ? "Done." : "") },
+      ]);
+      if (changed) setFlash("AI updated the page — review it, then Save");
     } catch {
-      setError("Couldn't reach the AI. Check your connection.");
+      setAiMessages((m) => [...m, { role: "error", text: "Couldn't reach the AI. Check your connection." }]);
     } finally {
       setAiBusy(false);
     }
@@ -648,14 +663,41 @@ export function Editor({ slug, role }: { slug: string; role: Role }) {
           </div>
 
           {/* AI assistant */}
-          <div className="border-t border-border p-4">
+          <div className="flex max-h-[50vh] flex-col border-t border-border">
             {doc?.type === "page" ? (
+              <>
+                {aiMessages.length > 0 && (
+                  <div
+                    ref={aiScrollRef}
+                    className="flex-1 space-y-3 overflow-y-auto p-4 pb-2"
+                  >
+                    {aiMessages.map((m, i) => (
+                      <div
+                        key={i}
+                        className={
+                          m.role === "user"
+                            ? "ml-4 rounded-lg bg-card-hover px-3 py-2 text-sm"
+                            : m.role === "error"
+                              ? "rounded-lg border border-red-900/50 bg-red-950/40 px-3 py-2 text-sm text-red-300"
+                              : "rounded-lg bg-background px-3 py-2 text-sm text-foreground/90"
+                        }
+                      >
+                        {m.text}
+                      </div>
+                    ))}
+                    {aiBusy && (
+                      <div className="flex items-center gap-2 rounded-lg bg-background px-3 py-2 text-sm text-muted">
+                        <Spinner className="h-3.5 w-3.5" /> Thinking…
+                      </div>
+                    )}
+                  </div>
+                )}
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
                   runAiEdit();
                 }}
-                className="rounded-lg border border-border bg-background p-3"
+                className="m-4 mt-2 rounded-lg border border-border bg-background p-3"
               >
                 <textarea
                   value={aiInstruction}
@@ -671,13 +713,13 @@ export function Editor({ slug, role }: { slug: string; role: Role }) {
                   placeholder={
                     aiLimitReached
                       ? "Daily free AI limit reached — resets at midnight"
-                      : "Ask AI to change anything… e.g. “make the headline punchier”"
+                      : "Ask a question or ask AI to change something…"
                   }
                   className="w-full resize-none bg-transparent text-sm text-foreground placeholder:text-muted/50 focus:outline-none disabled:cursor-not-allowed"
                 />
                 <div className="mt-2 flex items-center justify-between">
                   <span className="text-xs text-muted/70">
-                    Edits the text on this page. Review, then Save.
+                    Chats about this page, and edits text when you ask.
                   </span>
                   <Button
                     type="submit"
@@ -705,8 +747,9 @@ export function Editor({ slug, role }: { slug: string; role: Role }) {
                   </p>
                 )}
               </form>
+              </>
             ) : (
-              <p className="text-xs text-muted/70">
+              <p className="p-4 text-xs text-muted/70">
                 AI editing is available on pages. Open a page to use it.
               </p>
             )}
