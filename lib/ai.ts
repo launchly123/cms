@@ -20,6 +20,7 @@ interface EditableContent {
 interface AiResult {
   reply: string;
   content: EditableContent;
+  edited: boolean;
 }
 
 function toEditable(page: PageDraft): EditableContent {
@@ -64,16 +65,23 @@ What you can see: only this page's TEXT — title, hero heading/subheading, sect
 What you CANNOT see: the site's visual design — fonts, colors, layout, spacing, images, or CSS. If asked about any of those, say plainly that you can only see and edit the page's text content, not its design, so you can't answer that — then offer to help with the text instead. Never guess or make up an answer about the design.
 
 Behavior:
-- If the user asks a question or is just chatting, answer conversationally in "reply" and leave "content" IDENTICAL to what you were given (change nothing).
-- If the user asks you to change/write/edit something, make that change in "content" and put a short, friendly one-sentence confirmation in "reply" (e.g. "Done — I made the headline punchier.").
+- If the user asks a question or is just chatting, answer conversationally in "reply", set "edited" to false, and copy "content" back EXACTLY character-for-character as given — do not retype it, do not fix typos, do not touch accents (ñ, á, é, etc.) or punctuation, even by accident.
+- If the user asks you to change/write/edit something, make that specific change in "content", set "edited" to true, and put a short, friendly one-sentence confirmation in "reply" (e.g. "Done — I made the headline punchier.").
+- When "edited" is true, only change the fields the user actually asked about — leave every other field byte-for-byte identical to the input, including accents and punctuation.
 - Keep "content"'s keys and shape exactly as given. Keep every section's "id" unchanged. Do not add or remove sections unless explicitly asked. Don't invent URLs or images.
-- Match the site's existing language and tone when writing copy.
+- Match the site's existing language and tone when writing new copy.
 - Keep "reply" short — one or two sentences, plain text, no markdown.
 
 Always respond with ONLY a single JSON object, no prose outside it, no markdown fences, in exactly this shape:
-{"reply": "<your chat message>", "content": { "title": "...", "hero_heading": "...", "hero_subheading": "...", "sections": [...], "seo_title": "...", "seo_description": "...", "seo_keyphrase": "..." }}`;
+{"reply": "<your chat message>", "edited": true or false, "content": { "title": "...", "hero_heading": "...", "hero_subheading": "...", "sections": [...], "seo_title": "...", "seo_description": "...", "seo_keyphrase": "..." }}`;
 
-/** Try hard to get {reply, content} out of a model response, however messy. */
+/**
+ * Try hard to get {reply, edited, content} out of a model response, however
+ * messy. Free/small models sometimes retype fields even when told not to
+ * (e.g. dropping an accent) — so unless the model explicitly signals
+ * edited:true, we ALWAYS keep the original content untouched, never the
+ * model's echoed copy. That guarantees a question can never corrupt the page.
+ */
 function parseAiResult(raw: string, fallback: EditableContent): AiResult {
   const candidates: string[] = [raw.trim()];
   const start = raw.indexOf("{");
@@ -87,12 +95,13 @@ function parseAiResult(raw: string, fallback: EditableContent): AiResult {
       const parsed = JSON.parse(candidate);
       if (parsed && typeof parsed === "object") {
         const reply = typeof parsed.reply === "string" ? parsed.reply : "";
-        const content =
-          parsed.content && typeof parsed.content === "object"
-            ? (parsed.content as EditableContent)
-            : fallback;
-        if (!Array.isArray(content.sections)) content.sections = fallback.sections;
-        if (reply || parsed.content) return { reply: reply || "Done.", content };
+        const edited = parsed.edited === true;
+        let content = fallback;
+        if (edited && parsed.content && typeof parsed.content === "object") {
+          content = parsed.content as EditableContent;
+          if (!Array.isArray(content.sections)) content.sections = fallback.sections;
+        }
+        if (reply || parsed.content) return { reply: reply || "Done.", edited, content };
       }
     } catch {
       // try next candidate
@@ -101,7 +110,11 @@ function parseAiResult(raw: string, fallback: EditableContent): AiResult {
 
   // Model ignored the JSON format entirely — treat its whole reply as a chat
   // answer and leave the page untouched, so questions still get answered.
-  return { reply: raw.trim() || "I didn't quite catch that — could you rephrase?", content: fallback };
+  return {
+    reply: raw.trim() || "I didn't quite catch that — could you rephrase?",
+    edited: false,
+    content: fallback,
+  };
 }
 
 async function callAnthropic(
@@ -156,7 +169,7 @@ export async function aiEditPage(
   settings: AppSettings,
   instruction: string,
   page: PageDraft
-): Promise<{ reply: string; page: PageDraft }> {
+): Promise<{ reply: string; page: PageDraft; edited: boolean }> {
   const editable = toEditable(page);
   const userContent = `Current page content:\n${JSON.stringify(
     editable,
@@ -169,6 +182,8 @@ export async function aiEditPage(
       ? await callOpenRouter(settings, userContent)
       : await callAnthropic(settings, userContent);
 
-  const { reply, content } = parseAiResult(raw, editable);
-  return { reply, page: applyEditable(page, content) };
+  const { reply, edited, content } = parseAiResult(raw, editable);
+  // edited=false means content is guaranteed to be `editable` (the untouched
+  // original) — applyEditable is a no-op merge in that case, page unchanged.
+  return { reply, page: applyEditable(page, content), edited };
 }

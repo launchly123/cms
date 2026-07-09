@@ -298,14 +298,14 @@ export function Editor({ slug, role }: { slug: string; role: Role }) {
         setAiMessages((m) => [...m, { role: "error", text: msg }]);
         return;
       }
-      const changed = JSON.stringify(data.page) !== JSON.stringify(pageForm);
-      setPageForm(data.page);
+      const edited = Boolean(data.edited);
+      if (edited) setPageForm(data.page);
       if (data.usage) setAiUsage(data.usage);
       setAiMessages((m) => [
         ...m,
-        { role: "assistant", text: data.reply || (changed ? "Done." : "") },
+        { role: "assistant", text: data.reply || (edited ? "Done." : "") },
       ]);
-      if (changed) setFlash("AI updated the page — review it, then Save");
+      if (edited) setFlash("AI updated the page — review it, then Save");
     } catch {
       setAiMessages((m) => [...m, { role: "error", text: "Couldn't reach the AI. Check your connection." }]);
     } finally {

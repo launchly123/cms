@@ -49,7 +49,7 @@ export async function POST(
     }
 
     try {
-      const { reply, page } = await aiEditPage(
+      const { reply, page, edited } = await aiEditPage(
         settings,
         parsed.data.instruction,
         parsed.data.page
@@ -59,6 +59,7 @@ export async function POST(
       return NextResponse.json({
         reply,
         page,
+        edited,
         usage: { count: newUsage.count, limit: newUsage.limit },
       });
     } catch (e) {
