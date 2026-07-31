@@ -84,3 +84,59 @@ export interface Contact {
   social_links: Record<string, string>;
   updated_at: string;
 }
+
+/* ------------------------------------------------------------------ */
+/* Leads — prospects surfaced by the Offline Business Finder.          */
+/* Written to the `businesses` table by that app; read-only here apart */
+/* from the outreach fields an operator edits (status, notes, contact).*/
+/* ------------------------------------------------------------------ */
+
+export type LeadStatus = "not_contacted" | "in_outreach" | "closed" | "skipped";
+
+/** Why we believe this business has no site of its own. */
+export type WebsiteSignal =
+  | "no_website_field"
+  | "social_only"
+  | "directory_only"
+  | "has_website"
+  | "unknown";
+
+export interface LeadPhoto {
+  url: string;
+  caption?: string;
+}
+
+export interface LeadSummary {
+  text: string;
+  pitchAngle?: string;
+  sentiment?: string;
+  opportunityScore?: number;
+  source: string;
+  generatedAt: string;
+}
+
+export interface Lead {
+  id: string;
+  external_id: string | null;
+  /** "google_places" | "yelp" | "mock" | "manual" — "mock" means synthetic. */
+  source: string;
+  name: string;
+  category: string;
+  street: string | null;
+  city: string;
+  state: string;
+  postal_code: string | null;
+  phone: string | null;
+  contact_name: string | null;
+  email: string | null;
+  website: string | null;
+  website_signal: WebsiteSignal;
+  rating: number | string | null;
+  review_count: number | null;
+  photos: LeadPhoto[];
+  summary: LeadSummary | null;
+  lead_status: LeadStatus;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
