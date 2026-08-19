@@ -15,6 +15,7 @@ export async function GET(
       .from("websites")
       .select("*")
       .eq("id", id)
+      .is("deleted_at", null)
       .maybeSingle();
     if (error) throw error;
     if (!data) return apiError(404, "not_found");
@@ -51,6 +52,7 @@ export async function PATCH(
       .from("websites")
       .update(update)
       .eq("id", id)
+      .is("deleted_at", null)
       .select()
       .maybeSingle();
 
@@ -67,16 +69,67 @@ export async function PATCH(
   }
 }
 
+/**
+ * Delete a site.
+ *
+ * This marks the row deleted rather than removing it, and that is deliberate.
+ * The dashboard POSTs /api/websites/sync on every load, which imports any
+ * Vercel project whose id is not already on a websites row. Removing the row
+ * therefore un-deletes the site on the next page load — the bug this replaces.
+ * The tombstone keeps the id known, so the sync skips it forever.
+ *
+ * `?purge=1` really does remove the row, for when the Vercel project is gone
+ * too and there is nothing left to re-import. Deleting the row while the
+ * project still exists in Vercel will simply bring the site back.
+ */
 export async function DELETE(
   req: Request,
   ctx: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await ctx.params;
+    const purge = new URL(req.url).searchParams.get("purge") === "1";
     const supabase = supabaseAdmin();
-    const { error } = await supabase.from("websites").delete().eq("id", id);
+
+    if (purge) {
+      const { error } = await supabase.from("websites").delete().eq("id", id);
+      if (error) throw error;
+      return NextResponse.json({ ok: true, purged: true });
+    }
+
+    const { data, error } = await supabase
+      .from("websites")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", id)
+      .is("deleted_at", null)
+      .select("id")
+      .maybeSingle();
+
     if (error) throw error;
-    return NextResponse.json({ ok: true });
+    if (!data) return apiError(404, "not_found");
+    return NextResponse.json({ ok: true, purged: false });
+  } catch (e) {
+    return handleApiError(e);
+  }
+}
+
+/** Undo a delete. */
+export async function POST(
+  req: Request,
+  ctx: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await ctx.params;
+    const supabase = supabaseAdmin();
+    const { data, error } = await supabase
+      .from("websites")
+      .update({ deleted_at: null })
+      .eq("id", id)
+      .select("*")
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return apiError(404, "not_found");
+    return NextResponse.json({ website: data });
   } catch (e) {
     return handleApiError(e);
   }

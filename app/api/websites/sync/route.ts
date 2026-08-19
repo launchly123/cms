@@ -9,6 +9,10 @@ export async function POST() {
     const projects = await listVercelProjects();
     const supabase = supabaseAdmin();
 
+    // Deliberately NOT filtered by deleted_at. A deleted site keeps its row as
+    // a tombstone precisely so its Vercel project still counts as "known" here
+    // and never gets re-imported. Adding `.is("deleted_at", null)` to this query
+    // would resurrect every deleted site on the next dashboard load.
     const { data: existing, error: existingError } = await supabase
       .from("websites")
       .select("id, vercel_project_id");

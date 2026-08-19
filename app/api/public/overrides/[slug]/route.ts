@@ -32,6 +32,7 @@ export async function GET(
       .from("websites")
       .select("id")
       .eq("slug", slug)
+      .is("deleted_at", null)
       .maybeSingle();
     if (!website) {
       return NextResponse.json({ overrides: {} }, { headers: CORS });

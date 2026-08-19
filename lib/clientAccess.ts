@@ -25,6 +25,7 @@ export async function getEditorAccess(slug: string): Promise<
     .from("websites")
     .select("*")
     .eq("slug", slug)
+    .is("deleted_at", null)
     .maybeSingle();
   if (error) throw error;
   if (!data) return { ok: false, reason: "not_found" };

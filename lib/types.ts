@@ -10,6 +10,11 @@ export interface Website {
   deploy_hook_url: string | null;
   status: WebsiteStatus;
   client_password_hash?: string | null;
+  /**
+   * Set when the site is deleted. The row stays so the Vercel sync keeps
+   * recognising the project and does not re-import it — see schema.sql.
+   */
+  deleted_at?: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -21,6 +21,13 @@ create table if not exists public.websites (
 
 alter table public.websites add column if not exists client_password_hash text;
 
+-- Deleting a site has to leave a tombstone behind, not remove the row.
+-- The dashboard re-imports every Vercel project it does not already know about
+-- on each load, and it recognises a project by vercel_project_id on an existing
+-- row. Hard-delete the row and the very next page load imports the site again.
+-- Keeping the row (with deleted_at set) is what makes a deletion stick.
+alter table public.websites add column if not exists deleted_at timestamptz;
+
 create table if not exists public.pages (
   id uuid primary key default gen_random_uuid(),
   website_id uuid not null references public.websites(id) on delete cascade,

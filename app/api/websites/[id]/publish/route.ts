@@ -26,6 +26,7 @@ export async function POST(
       .from("websites")
       .select("*")
       .eq("id", id)
+      .is("deleted_at", null)
       .maybeSingle();
     if (error) throw error;
     if (!website) return apiError(404, "not_found");

@@ -26,6 +26,7 @@ export async function POST(req: Request) {
       .from("websites")
       .select("id, client_password_hash")
       .eq("slug", slug)
+      .is("deleted_at", null)
       .maybeSingle();
     if (error) throw error;
     if (!website) return apiError(404, "not_found");
